@@ -292,11 +292,15 @@ window.gameState = {
     createLine(ports, color) {
         if (ports.length < 2) return null;
 
+        // Generate path that avoids islands
+        const path = this.generateShippingLanePath(ports);
+
         const line = {
             id: this.generateId(),
             ports: [...ports],
             color: color || GAME_CONFIG.LINE_COLORS[this.lines.length % GAME_CONFIG.LINE_COLORS.length],
-            ships: []
+            ships: [],
+            path: path
         };
 
         // Add initial ship to the line
@@ -308,22 +312,22 @@ window.gameState = {
 
     // Add a ship to a shipping line
     addShipToLine(line) {
-        // Position the ship at the first port of the line
-        const startPort = this.ports.find(p => p.id === line.ports[0]);
+        // Position the ship at the first point of the path
+        const start = line.path[0];
 
         const ship = {
             id: this.generateId(),
-            x: startPort.x,
-            y: startPort.y,
+            x: start.x,
+            y: start.y,
             line: line.id,
             capacity: GAME_CONFIG.SHIP_BASE_CAPACITY,
             cargo: [],
-            currentPortIndex: 0,
-            nextPortIndex: 1,
+            pathIndex: 0,
             progress: 0,
             isDocked: false,
             dockTime: 0,
-            upgradeLevel: 0
+            upgradeLevel: 0,
+            direction: 1 // 1 = forward, -1 = backward
         };
 
         line.ships.push(ship.id);
@@ -369,172 +373,62 @@ window.gameState = {
     updateShips(deltaTime) {
         for (const ship of this.ships) {
             const line = this.lines.find(l => l.id === ship.line);
-            if (!line || line.ports.length < 2) continue;
-
-            const currentPort = this.ports.find(p => p.id === line.ports[ship.currentPortIndex]);
-            const nextPort = this.ports.find(p => p.id === line.ports[ship.nextPortIndex]);
+            if (!line || !line.path || line.path.length < 2) continue;
 
             if (ship.isDocked) {
                 // Handle docking time
                 ship.dockTime += deltaTime;
 
-                if (ship.dockTime >= GAME_CONFIG.SHIP_DOCK_TIME / currentPort.exchangeSpeed) {
+                // Find the port we're docked at
+                const currentPort = this.ports.find(p => p.id === ship.dockedPortId);
+
+                if (currentPort && ship.dockTime >= GAME_CONFIG.SHIP_DOCK_TIME / currentPort.exchangeSpeed) {
                     // Finished docking, continue journey
                     ship.isDocked = false;
                     ship.dockTime = 0;
                     ship.progress = 0;
-
-                    // Move to next port
-                    ship.currentPortIndex = ship.nextPortIndex;
-                    ship.nextPortIndex = (ship.nextPortIndex + 1) % line.ports.length;
+                    // No need to update pathIndex here, it's already at the port
                 }
 
                 // While docked, handle cargo exchange
-                this.handleCargoExchange(ship, currentPort);
+                if (currentPort) {
+                    this.handleCargoExchange(ship, currentPort);
+                }
             } else {
-                // Get all ports in the line to calculate the path
-                const linePorts = line.ports.map(portId => this.ports.find(p => p.id === portId));
-
-                // Calculate the distance along the shipping lane
-                let distance;
-                let p0, p1, p2, p3;
-
-                if (linePorts.length === 2) {
-                    // For two ports, use straight line distance
-                    distance = Math.sqrt(
-                        Math.pow(nextPort.x - currentPort.x, 2) +
-                        Math.pow(nextPort.y - currentPort.y, 2)
-                    );
-                } else {
-                    // For bezier curves, use an approximation of the curve length
-                    // This is a simplification - a more accurate approach would use arc length parameterization
-                    const currentIndex = ship.currentPortIndex;
-                    const nextIndex = ship.nextPortIndex;
-
-                    // Get control points for the bezier curve
-                    if (nextIndex > currentIndex || (currentIndex === linePorts.length - 1 && nextIndex === 0)) {
-                        // Moving forward in the line or wrapping around from end to start
-                        p0 = currentPort;
-                        p3 = nextPort;
-
-                        // Calculate control points similar to drawLines function
-                        const cpDistance = Math.min(Math.sqrt(
-                            Math.pow(p3.x - p0.x, 2) + Math.pow(p3.y - p0.y, 2)
-                        ) * 0.4, 50);
-
-                        if (currentIndex === linePorts.length - 1 && nextIndex === 0) {
-                            // Last to first port
-                            const prev = linePorts[currentIndex - 1];
-                            const second = linePorts[1];
-
-                            // Direction vectors
-                            const toPrev = { x: prev.x - p0.x, y: prev.y - p0.y };
-                            const toPrevLength = Math.sqrt(toPrev.x*toPrev.x + toPrev.y*toPrev.y);
-
-                            const firstToSecond = { x: second.x - p3.x, y: second.y - p3.y };
-                            const firstToSecondLength = Math.sqrt(firstToSecond.x*firstToSecond.x + firstToSecond.y*firstToSecond.y);
-
-                            // Control points
-                            p1 = {
-                                x: p0.x - (toPrev.x / toPrevLength) * cpDistance,
-                                y: p0.y - (toPrev.y / toPrevLength) * cpDistance
-                            };
-
-                            p2 = {
-                                x: p3.x - (firstToSecond.x / firstToSecondLength) * cpDistance,
-                                y: p3.y - (firstToSecond.y / firstToSecondLength) * cpDistance
-                            };
-                        } else {
-                            // Normal segment
-                            const next2Index = (nextIndex + 1) % linePorts.length;
-                            const next2 = linePorts[next2Index];
-
-                            // Direction vectors
-                            const toNext = { x: p3.x - p0.x, y: p3.y - p0.y };
-                            const toNextLength = Math.sqrt(toNext.x*toNext.x + toNext.y*toNext.y);
-
-                            const nextToNext2 = { x: next2.x - p3.x, y: next2.y - p3.y };
-                            const nextToNext2Length = Math.sqrt(nextToNext2.x*nextToNext2.x + nextToNext2.y*nextToNext2.y);
-
-                            // Control points
-                            p1 = {
-                                x: p0.x + (toNext.x / toNextLength) * cpDistance,
-                                y: p0.y + (toNext.y / toNextLength) * cpDistance
-                            };
-
-                            p2 = {
-                                x: p3.x - (nextToNext2.x / nextToNext2Length) * cpDistance,
-                                y: p3.y - (nextToNext2.y / nextToNext2Length) * cpDistance
-                            };
-                        }
-                    } else {
-                        // Moving backward in the line
-                        p0 = nextPort;
-                        p3 = currentPort;
-
-                        // Calculate control points (reversed)
-                        const cpDistance = Math.min(Math.sqrt(
-                            Math.pow(p3.x - p0.x, 2) + Math.pow(p3.y - p0.y, 2)
-                        ) * 0.4, 50);
-
-                        // Direction vectors
-                        const toNext = { x: p3.x - p0.x, y: p3.y - p0.y };
-                        const toNextLength = Math.sqrt(toNext.x*toNext.x + toNext.y*toNext.y);
-
-                        // Control points (simplified for backward movement)
-                        p1 = {
-                            x: p0.x + (toNext.x / toNextLength) * cpDistance,
-                            y: p0.y + (toNext.y / toNextLength) * cpDistance
-                        };
-
-                        p2 = {
-                            x: p3.x - (toNext.x / toNextLength) * cpDistance,
-                            y: p3.y - (toNext.y / toNextLength) * cpDistance
-                        };
-                    }
-
-                    // Approximate curve length (using a few sample points)
-                    const numSamples = 10;
-                    let curveLength = 0;
-                    let prevPoint = this.calculateBezierPoint(0, p0, p1, p2, p3);
-
-                    for (let i = 1; i <= numSamples; i++) {
-                        const t = i / numSamples;
-                        const point = this.calculateBezierPoint(t, p0, p1, p2, p3);
-                        curveLength += Math.sqrt(
-                            Math.pow(point.x - prevPoint.x, 2) +
-                            Math.pow(point.y - prevPoint.y, 2)
-                        );
-                        prevPoint = point;
-                    }
-
-                    distance = curveLength;
+                // Move along the path in current direction
+                const path = line.path;
+                let idx = ship.pathIndex;
+                let nextIdx = idx + ship.direction;
+                // Check for end of path
+                if (nextIdx < 0 || nextIdx >= path.length) {
+                    // Reverse direction
+                    ship.direction *= -1;
+                    nextIdx = idx + ship.direction;
+                    // Clamp to valid range
+                    nextIdx = Math.max(0, Math.min(path.length - 1, nextIdx));
                 }
-
+                const from = path[idx];
+                const to = path[nextIdx];
+                const segLen = Math.hypot(to.x - from.x, to.y - from.y);
                 const speed = GAME_CONFIG.SHIP_SPEED * deltaTime;
-                ship.progress += speed / distance;
+                ship.progress += speed / segLen;
 
-                // Calculate position along the path
-                if (linePorts.length === 2) {
-                    // For two ports, use linear interpolation
-                    ship.x = currentPort.x + (nextPort.x - currentPort.x) * ship.progress;
-                    ship.y = currentPort.y + (nextPort.y - currentPort.y) * ship.progress;
-                } else {
-                    // For bezier curves, calculate position along the curve
-                    const point = this.calculateBezierPoint(ship.progress, p0, p1, p2, p3);
-                    ship.x = point.x;
-                    ship.y = point.y;
-
-                    // Store the tangent angle for ship rotation
-                    ship.angle = this.calculateBezierTangent(ship.progress, p0, p1, p2, p3);
-                }
-
-                // Check if arrived at next port
                 if (ship.progress >= 1) {
-                    ship.x = nextPort.x;
-                    ship.y = nextPort.y;
-                    ship.isDocked = true;
-                    ship.dockTime = 0;
+                    ship.x = to.x;
+                    ship.y = to.y;
+                    ship.pathIndex = nextIdx;
+                    ship.progress = 0;
+
+                    // If at a port, dock
+                    const port = this.ports.find(p => Math.hypot(p.x - ship.x, p.y - ship.y) < GAME_CONFIG.PORT_RADIUS + 2);
+                    if (port) {
+                        ship.isDocked = true;
+                        ship.dockTime = 0;
+                        ship.dockedPortId = port.id;
+                    }
+                } else {
+                    ship.x = from.x + (to.x - from.x) * ship.progress;
+                    ship.y = from.y + (to.y - from.y) * ship.progress;
                 }
             }
         }
@@ -1031,6 +925,191 @@ window.gameState = {
         return Math.random().toString(36).substr(2, 9);
     },
 
+    // --- Generate a path for a shipping lane that avoids islands using A* pathfinding ---
+    generateShippingLanePath(portIds) {
+        // Only connect ports in the given order, do not loop back to the start
+        const path = [];
+        for (let i = 0; i < portIds.length - 1; i++) {
+            const fromPort = this.ports.find(p => p.id === portIds[i]);
+            const toPort = this.ports.find(p => p.id === portIds[i + 1]);
+            const segment = this.findAStarPath(fromPort, toPort);
+            if (segment.length === 0) continue;
+            if (i === 0) path.push(...segment);
+            else path.push(...segment.slice(1)); // Avoid duplicate points
+        }
+        // Path smoothing for visual appeal
+        return this.smoothPath(path, 2.5);
+    },
+
+    // --- New: Grid-based A* pathfinding between two points, avoiding islands ---
+    findAStarPath(from, to) {
+        // Grid settings
+        const gridSize = 24; // pixels per cell
+        const cols = Math.ceil(this.width / gridSize);
+        const rows = Math.ceil(this.height / gridSize);
+
+        // Build grid: 0 = free, 1 = blocked
+        const grid = [];
+        for (let y = 0; y < rows; y++) {
+            grid[y] = [];
+            for (let x = 0; x < cols; x++) {
+                const cx = x * gridSize + gridSize / 2;
+                const cy = y * gridSize + gridSize / 2;
+                grid[y][x] = this.isPointInIsland(cx, cy) ? 1 : 0;
+            }
+        }
+
+        // Convert world coordinates to grid
+        const toGrid = (pt) => ({
+            x: Math.floor(pt.x / gridSize),
+            y: Math.floor(pt.y / gridSize)
+        });
+        const toWorld = (cell) => ({
+            x: cell.x * gridSize + gridSize / 2,
+            y: cell.y * gridSize + gridSize / 2
+        });
+
+        const start = toGrid(from);
+        const end = toGrid(to);
+
+        // Clamp to grid
+        start.x = Math.max(0, Math.min(cols - 1, start.x));
+        start.y = Math.max(0, Math.min(rows - 1, start.y));
+        end.x = Math.max(0, Math.min(cols - 1, end.x));
+        end.y = Math.max(0, Math.min(rows - 1, end.y));
+
+        // If start or end is blocked, find nearest free cell
+        if (grid[start.y][start.x] === 1) {
+            const free = this.findNearestFreeCell(grid, start.x, start.y);
+            if (!free) return [];
+            start.x = free.x; start.y = free.y;
+        }
+        if (grid[end.y][end.x] === 1) {
+            const free = this.findNearestFreeCell(grid, end.x, end.y);
+            if (!free) return [];
+            end.x = free.x; end.y = free.y;
+        }
+
+        // A* search
+        const open = [];
+        const closed = new Set();
+        const nodeKey = (x, y) => `${x},${y}`;
+        open.push({
+            x: start.x, y: start.y, g: 0,
+            h: Math.abs(end.x - start.x) + Math.abs(end.y - start.y),
+            f: 0, parent: null
+        });
+
+        let found = null;
+        while (open.length > 0) {
+            // Get node with lowest f
+            open.sort((a, b) => (a.g + a.h) - (b.g + b.h));
+            const current = open.shift();
+            if (current.x === end.x && current.y === end.y) {
+                found = current;
+                break;
+            }
+            closed.add(nodeKey(current.x, current.y));
+            // 8 directions
+            for (const [dx, dy] of [
+                [1,0], [-1,0], [0,1], [0,-1],
+                [1,1], [-1,1], [1,-1], [-1,-1]
+            ]) {
+                const nx = current.x + dx, ny = current.y + dy;
+                if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+                if (grid[ny][nx] === 1) continue;
+                if (closed.has(nodeKey(nx, ny))) continue;
+                // Diagonal move: check for corner cutting
+                if (dx !== 0 && dy !== 0) {
+                    if (grid[current.y][nx] === 1 || grid[ny][current.x] === 1) continue;
+                }
+                const g = current.g + ((dx === 0 || dy === 0) ? 1 : 1.414);
+                const h = Math.abs(end.x - nx) + Math.abs(end.y - ny);
+                // If already in open with lower g, skip
+                const existing = open.find(n => n.x === nx && n.y === ny);
+                if (existing && existing.g <= g) continue;
+                open.push({ x: nx, y: ny, g, h, f: g + h, parent: current });
+            }
+        }
+
+        // Reconstruct path
+        const path = [];
+        let node = found;
+        while (node) {
+            path.push(toWorld(node));
+            node = node.parent;
+        }
+        path.reverse();
+        // Ensure start and end are exact
+        if (path.length > 0) {
+            path[0] = { x: from.x, y: from.y };
+            path[path.length - 1] = { x: to.x, y: to.y };
+        }
+        return path;
+    },
+
+    // --- Helper: Is a point inside any island? ---
+    isPointInIsland(x, y) {
+        for (const island of this.islands) {
+            const dx = x - island.x;
+            const dy = y - island.y;
+            if (Math.sqrt(dx * dx + dy * dy) < island.radius + 12) return true;
+        }
+        return false;
+    },
+
+    // --- Helper: Find nearest free cell in grid ---
+    findNearestFreeCell(grid, x, y) {
+        const rows = grid.length, cols = grid[0].length;
+        const visited = new Set();
+        const queue = [{ x, y }];
+        while (queue.length > 0) {
+            const { x: cx, y: cy } = queue.shift();
+            if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+            if (visited.has(`${cx},${cy}`)) continue;
+            visited.add(`${cx},${cy}`);
+            if (grid[cy][cx] === 0) return { x: cx, y: cy };
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                queue.push({ x: cx + dx, y: cy + dy });
+            }
+        }
+        return null;
+    },
+
+    // --- Helper: Path smoothing using Ramer-Douglas-Peucker ---
+    smoothPath(path, epsilon = 2.5) {
+        if (path.length < 3) return path;
+        // RDP algorithm
+        const rdp = (pts, eps) => {
+            let dmax = 0, index = 0;
+            for (let i = 1; i < pts.length - 1; i++) {
+                const d = this.perpendicularDistance(pts[i], pts[0], pts[pts.length - 1]);
+                if (d > dmax) {
+                    index = i;
+                    dmax = d;
+                }
+            }
+            if (dmax > eps) {
+                const rec1 = rdp(pts.slice(0, index + 1), eps);
+                const rec2 = rdp(pts.slice(index), eps);
+                return rec1.slice(0, -1).concat(rec2);
+            } else {
+                return [pts[0], pts[pts.length - 1]];
+            }
+        };
+        return rdp(path, epsilon);
+    },
+
+    // --- Helper: Perpendicular distance from point to line segment ---
+    perpendicularDistance(pt, lineStart, lineEnd) {
+        const x = pt.x, y = pt.y, x1 = lineStart.x, y1 = lineStart.y, x2 = lineEnd.x, y2 = lineEnd.y;
+        const dx = x2 - x1, dy = y2 - y1;
+        if (dx === 0 && dy === 0) return Math.hypot(x - x1, y - y1);
+        const t = ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy);
+        const projX = x1 + t * dx, projY = y1 + t * dy;
+        return Math.hypot(x - projX, y - projY);
+    },
+
     // Main game loop
     gameLoop(timestamp) {
         // Calculate delta time
@@ -1171,104 +1250,20 @@ window.gameState = {
     // Draw shipping lines in Mini Metro style (smoother curves, more elegant)
     drawLines() {
         for (const line of this.lines) {
-            if (line.ports.length < 2) continue;
-
-            // Get all ports in the line
-            const linePorts = line.ports.map(portId => this.ports.find(p => p.id === portId));
-
-            // Draw the line with smoother curves
+            if (!line.path || line.path.length < 2) continue;
             this.ctx.save();
-
-            // Add more pronounced shadow for better visibility
             this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
             this.ctx.shadowBlur = 4;
-            this.ctx.shadowOffsetX = 0;
-            this.ctx.shadowOffsetY = 2;
-
             this.ctx.strokeStyle = line.color;
-            this.ctx.lineWidth = GAME_CONFIG.LINE_WIDTH + 1; // Increase line width for better visibility
+            this.ctx.lineWidth = GAME_CONFIG.LINE_WIDTH + 1;
             this.ctx.lineCap = 'round';
             this.ctx.lineJoin = 'round';
-
-            // Draw main line with bezier curves for smoother appearance
             this.ctx.beginPath();
-
-            if (linePorts.length === 2) {
-                // For two ports, just draw a straight line
-                this.ctx.moveTo(linePorts[0].x, linePorts[0].y);
-                this.ctx.lineTo(linePorts[1].x, linePorts[1].y);
-            } else {
-                // For more than two ports, use bezier curves for smoother connections
-                this.ctx.moveTo(linePorts[0].x, linePorts[0].y);
-
-                for (let i = 0; i < linePorts.length; i++) {
-                    const current = linePorts[i];
-                    const next = linePorts[(i + 1) % linePorts.length];
-
-                    // Calculate control points for smoother curves
-                    // This creates a more natural, flowing curve like in Mini Metro
-                    const dx = next.x - current.x;
-                    const dy = next.y - current.y;
-                    const distance = Math.sqrt(dx*dx + dy*dy);
-
-                    // Control point distance (adjust for smoother curves)
-                    const cpDistance = Math.min(distance * 0.4, 50);
-
-                    // Calculate control points
-                    let cp1x, cp1y, cp2x, cp2y;
-
-                    // If we're connecting the last point back to the first
-                    if (i === linePorts.length - 1) {
-                        const prev = linePorts[i - 1];
-                        const first = linePorts[0];
-                        const second = linePorts[1];
-
-                        // Calculate direction vectors
-                        const toPrev = { x: prev.x - current.x, y: prev.y - current.y };
-                        const toFirst = { x: first.x - current.x, y: first.y - current.y };
-                        const firstToSecond = { x: second.x - first.x, y: second.y - first.y };
-
-                        // Normalize vectors
-                        const toPrevLength = Math.sqrt(toPrev.x*toPrev.x + toPrev.y*toPrev.y);
-                        const toFirstLength = Math.sqrt(toFirst.x*toFirst.x + toFirst.y*toFirst.y);
-                        const firstToSecondLength = Math.sqrt(firstToSecond.x*firstToSecond.x + firstToSecond.y*firstToSecond.y);
-
-                        // First control point (opposite direction of previous point)
-                        cp1x = current.x - (toPrev.x / toPrevLength) * cpDistance;
-                        cp1y = current.y - (toPrev.y / toPrevLength) * cpDistance;
-
-                        // Second control point (opposite direction of second point)
-                        cp2x = first.x - (firstToSecond.x / firstToSecondLength) * cpDistance;
-                        cp2y = first.y - (firstToSecond.y / firstToSecondLength) * cpDistance;
-                    } else {
-                        // For normal segments
-                        const next2 = linePorts[(i + 2) % linePorts.length];
-
-                        // Calculate direction vectors
-                        const toNext = { x: next.x - current.x, y: next.y - current.y };
-                        const nextToNext2 = { x: next2.x - next.x, y: next2.y - next.y };
-
-                        // Normalize vectors
-                        const toNextLength = Math.sqrt(toNext.x*toNext.x + toNext.y*toNext.y);
-                        const nextToNext2Length = Math.sqrt(nextToNext2.x*nextToNext2.x + nextToNext2.y*nextToNext2.y);
-
-                        // First control point (in direction of next point)
-                        cp1x = current.x + (toNext.x / toNextLength) * cpDistance;
-                        cp1y = current.y + (toNext.y / toNextLength) * cpDistance;
-
-                        // Second control point (opposite direction of next2 point)
-                        cp2x = next.x - (nextToNext2.x / nextToNext2Length) * cpDistance;
-                        cp2y = next.y - (nextToNext2.y / nextToNext2Length) * cpDistance;
-                    }
-
-                    // Draw the curve
-                    this.ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, next.x, next.y);
-                }
+            this.ctx.moveTo(line.path[0].x, line.path[0].y);
+            for (let i = 1; i < line.path.length; i++) {
+                this.ctx.lineTo(line.path[i].x, line.path[i].y);
             }
-
             this.ctx.stroke();
-
-            // Reset shadow for other elements
             this.ctx.shadowColor = 'transparent';
             this.ctx.restore();
         }
@@ -1288,8 +1283,6 @@ window.gameState = {
         // Add more pronounced shadow for better visibility (matching shipping lanes)
         this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
         this.ctx.shadowBlur = 4;
-        this.ctx.shadowOffsetX = 0;
-        this.ctx.shadowOffsetY = 2;
 
         this.ctx.strokeStyle = this.drawingLine.color;
         this.ctx.lineWidth = GAME_CONFIG.LINE_WIDTH + 1; // Increase line width for better visibility
@@ -1593,17 +1586,18 @@ window.gameState = {
             this.ctx.translate(ship.x, ship.y);
 
             // Rotate ship to face direction of travel
-            if (!ship.isDocked && ship.progress < 1) {
-                const line = this.lines.find(l => l.id === ship.line);
-                const currentPort = this.ports.find(p => p.id === line.ports[ship.currentPortIndex]);
-                const nextPort = this.ports.find(p => p.id === line.ports[ship.nextPortIndex]);
-
-                const angle = Math.atan2(nextPort.y - currentPort.y, nextPort.x - currentPort.x);
+            let angle = 0;
+            const line = this.lines.find(l => l.id === ship.line);
+            if (line && line.path && line.path.length > 1 && !ship.isDocked) {
+                const idx = ship.pathIndex;
+                const nextIdx = (idx + 1) % line.path.length;
+                const from = line.path[idx];
+                const to = line.path[nextIdx];
+                angle = Math.atan2(to.y - from.y, to.x - from.x);
                 this.ctx.rotate(angle);
             }
 
             // Get line color for ship
-            const line = this.lines.find(l => l.id === ship.line);
             const shipColor = line ? line.color : '#888888';
 
             // Add subtle shadow for depth
@@ -1797,3 +1791,4 @@ window.gameState = {
 window.addEventListener('load', () => {
     window.gameState.init();
 });
+
