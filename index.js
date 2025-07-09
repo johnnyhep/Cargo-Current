@@ -926,14 +926,65 @@ window.gameState = {
     },
 
     // --- Generate a path for a shipping lane that avoids islands using A* pathfinding ---
+    // Modified to make parallel lanes when segments coincide for extended lengths
     generateShippingLanePath(portIds) {
-        // Only connect ports in the given order, do not loop back to the start
         const path = [];
+        const parallelOffset = 10; // pixels between parallel lanes
+
+        // Helper to find how many lines already use this segment (for offset calculation)
+        const getSegmentParallelIndex = (fromId, toId) => {
+            let count = 0;
+            for (const line of this.lines) {
+                for (let i = 0; i < line.ports.length - 1; i++) {
+                    const a = line.ports[i], b = line.ports[i + 1];
+                    if (
+                        (a === fromId && b === toId) ||
+                        (a === toId && b === fromId)
+                    ) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        };
+
         for (let i = 0; i < portIds.length - 1; i++) {
             const fromPort = this.ports.find(p => p.id === portIds[i]);
             const toPort = this.ports.find(p => p.id === portIds[i + 1]);
-            const segment = this.findAStarPath(fromPort, toPort);
+            let segment = this.findAStarPath(fromPort, toPort);
             if (segment.length === 0) continue;
+
+            // Calculate parallel offset for this segment
+            const parallelIndex = getSegmentParallelIndex(fromPort.id, toPort.id);
+            if (parallelIndex > 0 && segment.length > 2) {
+                // Offset only the interior points, not the endpoints
+                segment = segment.map((pt, idx, arr) => {
+                    if (idx === 0 || idx === arr.length - 1) {
+                        // Endpoints (inside ports) coincide
+                        return pt;
+                    }
+                    // For interior points, offset perpendicular to direction
+                    let dir;
+                    if (idx === 0 && arr.length > 1) {
+                        dir = { x: arr[1].x - pt.x, y: arr[1].y - pt.y };
+                    } else if (idx === arr.length - 1 && arr.length > 1) {
+                        dir = { x: pt.x - arr[idx - 1].x, y: pt.y - arr[idx - 1].y };
+                    } else if (arr.length > 2) {
+                        dir = { x: arr[idx + 1].x - arr[idx - 1].x, y: arr[idx + 1].y - arr[idx - 1].y };
+                    } else {
+                        dir = { x: 1, y: 0 };
+                    }
+                    const len = Math.sqrt(dir.x * dir.x + dir.y * dir.y) || 1;
+                    const perp = { x: -dir.y / len, y: dir.x / len };
+                    const offsetDir = (parallelIndex % 2 === 0) ? 1 : -1;
+                    const offsetAmt = Math.ceil(parallelIndex / 2) * parallelOffset * offsetDir;
+                    return {
+                        x: pt.x + perp.x * offsetAmt,
+                        y: pt.y + perp.y * offsetAmt
+                    };
+                });
+            }
+
             if (i === 0) path.push(...segment);
             else path.push(...segment.slice(1)); // Avoid duplicate points
         }
@@ -1791,4 +1842,3 @@ window.gameState = {
 window.addEventListener('load', () => {
     window.gameState.init();
 });
-
