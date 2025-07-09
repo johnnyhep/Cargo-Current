@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cargo Current</title>
+    <style>
+        /* Mini Metro inspired styling */
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap');
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f8f8f8; /* Lighter background like Mini Metro */
+            font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Mini Metro style UI elements - clean, minimal, with subtle shadows */
+        .ui-panel {
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+            font-weight: 300;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 12px 15px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-size: 14px;
+            min-width: 180px;
+            justify-content: space-between;
+        }
+
+        #hud-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .hud-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .hud-value {
+            font-weight: 500;
+            margin-left: 5px;
+        }
+
+        #day-clock {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid #333;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: white;
+        }
+
+        #day-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background-color: transparent;
+        }
+
+        #day-label {
+            position: relative;
+            z-index: 2;
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        #line-management {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            padding: 12px 15px;
+            z-index: 10;
+            min-width: 180px;
+        }
+
+        #line-management h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-weight: 400;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #555;
+        }
+
+        .line-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 3px;
+            transition: background-color 0.2s ease;
+        }
+
+        .line-item:hover {
+            background-color: rgba(0, 0, 0, 0.03);
+        }
+
+        .line-color {
+            width: 25px;
+            height: 5px;
+            margin-right: 10px;
+            border-radius: 2.5px;
+        }
+
+        .line-info {
+            font-size: 13px;
+            color: #555;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #weekend-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 25px;
+            border-radius: 4px;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.15);
+            z-index: 20;
+            max-width: 450px;
+            width: 90%;
+        }
+
+        #weekend-modal h2 {
+            margin-top: 0;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+            color: #333;
+            font-size: 18px;
+        }
+
+        #weekend-modal h3 {
+            font-size: 14px;
+            font-weight: 400;
+            color: #555;
+            margin-bottom: 15px;
+        }
+
+        #weekend-modal p {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        .upgrade-option {
+            margin: 10px 0;
+            padding: 12px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+        }
+
+        .upgrade-option:hover {
+            background-color: #f5f5f5;
+            border-color: #ddd;
+        }
+
+        .upgrade-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: #f0f0f0;
+            margin-right: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #333;
+        }
+
+        .upgrade-content {
+            flex: 1;
+        }
+
+        .upgrade-option h4 {
+            margin-top: 0;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .upgrade-option p {
+            margin: 0;
+            color: #666;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        /* Game controls panel */
+        #game-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px;
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+        }
+
+        .control-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: white;
+            border: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-button:hover {
+            background-color: #f5f5f5;
+            transform: translateY(-2px);
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tooltip for UI elements */
+        .tooltip {
+            position: relative;
+        }
+
+        .tooltip:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+            margin-bottom: 5px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- HUD Panel (Mini Metro style) -->
+        <div id="hud" class="ui-panel">
+            <div id="hud-info">
+                <div class="hud-item">
+                    <span>Day:</span>
+                    <span id="current-day" class="hud-value">Monday</span>
+                </div>
+                <div class="hud-item">
+                    <span>Cargo:</span>
+                    <span id="cargo-delivered" class="hud-value">0</span>
+                </div>
+            </div>
+            <div id="day-clock">
+                <div id="day-progress"></div>
+                <div id="day-label">DAY</div>
+            </div>
+        </div>
+
+        <!-- Line Management Panel (Mini Metro style) -->
+        <div id="line-management" class="ui-panel">
+            <h3>Shipping Lines</h3>
+            <div id="lines-list"></div>
+        </div>
+
+        <!-- Game Controls (Mini Metro style) -->
+        <div id="game-controls" class="ui-panel">
+            <div class="control-button tooltip" data-tooltip="Pause Game">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                </svg>
+            </div>
+            <div class="control-button tooltip" data-tooltip="Speed Up">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5,4 19,12 5,20"></polygon>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Weekend Modal (Mini Metro style) -->
+        <div id="weekend-modal" class="hidden ui-panel">
+            <h2>Weekend Upgrades</h2>
+            <p>You've received a new ship!</p>
+            <h3>Choose one upgrade:</h3>
+            <div id="upgrade-options">
+                <div class="upgrade-option" id="megaport-option">
+                    <div class="upgrade-icon">P</div>
+                    <div class="upgrade-content">
+                        <h4>Megaport</h4>
+                        <p>Choose one port to receive +50% cargo capacity and +50% faster exchange speed</p>
+                    </div>
+                </div>
+                <div class="upgrade-option" id="new-line-option">
+                    <div class="upgrade-icon">L</div>
+                    <div class="upgrade-content">
+                        <h4>New Shipping Line</h4>
+                        <p>Add a new color-coded route with one ship pre-assigned</p>
+                    </div>
+                </div>
+                <div class="upgrade-option" id="ship-upgrade-option">
+                    <div class="upgrade-icon">S</div>
+                    <div class="upgrade-content">
+                        <h4>Ship Upgrade</h4>
+                        <p>Apply a +6 capacity boost to one ship</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+</html>
