@@ -908,7 +908,7 @@ window.gameState = {
 
         for (const port of this.ports) {
             const distance = Math.sqrt(
-                Math.pow(x - port.x, 2) + 
+                Math.pow(x - port.x, 2) +
                 Math.pow(y - port.y, 2)
             );
 
